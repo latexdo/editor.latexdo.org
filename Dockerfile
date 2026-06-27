@@ -9,6 +9,7 @@ RUN apt-get update \
     ca-certificates \
     dumb-init \
     latexmk \
+    pandoc \
     texlive-bibtex-extra \
     texlive-fonts-recommended \
     texlive-latex-base \

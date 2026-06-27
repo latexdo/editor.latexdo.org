@@ -3,13 +3,15 @@ import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import {
   access,
+  mkdtemp,
   mkdir,
   readFile,
   readdir,
   rename,
-  stat,
+  rm,
   writeFile,
 } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 
@@ -18,9 +20,13 @@ const execFileAsync = promisify(execFile);
 const port = Number(process.env.PORT ?? 8787);
 const dataRoot = process.env.LATEXDO_DATA_ROOT ?? "/data/latexdo";
 const maxTextContentLength = 5 * 1024 * 1024;
+const maxUploadContentLength = 25 * 1024 * 1024;
+const requestBodyLimit = Math.ceil(maxUploadContentLength * 1.4) + 1024 * 1024;
 const compileTimeoutMs = 45_000;
+const importTimeoutMs = 60_000;
 const compileMaxBuffer = 10 * 1024 * 1024;
 const engines = new Set(["pdflatex", "xelatex", "lualatex"]);
+const importKinds = new Set(["docx", "markdown"]);
 
 const starterDocument = String.raw`\documentclass[11pt]{article}
 
@@ -88,6 +94,15 @@ interface SessionIndex {
   projects: ProjectMeta[];
 }
 
+interface ImportResult {
+  project?: OpenProject;
+  relativePath: string;
+  sourcePath: string;
+  converter: "pandoc";
+  warnings: string[];
+  mediaFiles: string[];
+}
+
 type ExecFileFailure = Error & {
   stdout?: string;
   stderr?: string;
@@ -138,6 +153,18 @@ function normalizeRelativePath(relativePath: unknown): string {
 
 function baseName(relativePath: string): string {
   return relativePath.split("/").pop() ?? relativePath;
+}
+
+function fileStem(fileName: string): string {
+  const name = baseName(fileName).replace(/\.[^.]+$/, "");
+  const sanitized = name.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
+  return sanitized || "document";
+}
+
+function safeUploadName(fileName: unknown, fallback: string): string {
+  if (typeof fileName !== "string") return fallback;
+  const name = baseName(normalizeSlashes(fileName)).replace(/[^a-zA-Z0-9._-]+/g, "-");
+  return name || fallback;
 }
 
 function starterContent(relativePath: string): string {
@@ -335,6 +362,119 @@ function parseTextContent(value: unknown): string {
   return value;
 }
 
+function parseBase64Content(value: unknown): Buffer {
+  if (typeof value !== "string") {
+    throw new Error("Uploaded content is required.");
+  }
+
+  const normalized = value.replace(/\s/g, "");
+  if (!/^[a-zA-Z0-9+/]*={0,2}$/.test(normalized)) {
+    throw new Error("Uploaded content must be base64 encoded.");
+  }
+
+  const content = Buffer.from(normalized, "base64");
+  if (content.byteLength > maxUploadContentLength) {
+    throw new Error("Uploaded files are limited to 25 MB each.");
+  }
+
+  return content;
+}
+
+function warningsFromPandoc(stderr: string): string[] {
+  return stderr
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(0, 10);
+}
+
+function flattenEntries(entries: ProjectEntry[]): ProjectEntry[] {
+  const result: ProjectEntry[] = [];
+  for (const entry of entries) {
+    result.push(entry);
+    if (entry.children) result.push(...flattenEntries(entry.children));
+  }
+  return result;
+}
+
+async function uniqueTexPath(projectRoot: string, desiredPath: string): Promise<string> {
+  const normalized = normalizeRelativePath(desiredPath);
+  if (!(await exists(resolveProjectPath(projectRoot, normalized)))) {
+    return normalized;
+  }
+
+  const extension = path.posix.extname(normalized) || ".tex";
+  const withoutExtension = normalized.slice(0, -extension.length);
+  for (let index = 2; index < 1000; index += 1) {
+    const candidate = `${withoutExtension}-${index}${extension}`;
+    if (!(await exists(resolveProjectPath(projectRoot, candidate)))) {
+      return candidate;
+    }
+  }
+
+  throw new Error("Could not choose an output path for the imported document.");
+}
+
+async function projectForImport(
+  sessionId: string,
+  projectId: unknown,
+  sourceName: string,
+): Promise<{ project: ProjectMeta; created: boolean }> {
+  if (typeof projectId === "string" && projectId.trim()) {
+    return { project: await findProject(sessionId, projectId), created: false };
+  }
+
+  return {
+    project: await createProject(sessionId, fileStem(sourceName)),
+    created: true,
+  };
+}
+
+async function importWithPandoc(
+  projectRoot: string,
+  kind: string,
+  sourceName: string,
+  content: Buffer,
+  outputPath: string,
+): Promise<{ warnings: string[]; mediaFiles: string[] }> {
+  const tempDirectory = await mkdtemp(path.join(os.tmpdir(), "latexdo-import-"));
+  const sourcePath = path.join(tempDirectory, sourceName);
+
+  try {
+    await mkdir(path.dirname(resolveProjectPath(projectRoot, outputPath)), { recursive: true });
+    await writeFile(sourcePath, content);
+
+    const args =
+      kind === "docx"
+        ? [
+            sourcePath,
+            "--from=docx",
+            "--to=latex",
+            "--standalone",
+            "--extract-media=.",
+            "-o",
+            outputPath,
+          ]
+        : [sourcePath, "--from=gfm", "--to=latex", "--standalone", "-o", outputPath];
+
+    const { stderr } = await execFileAsync("pandoc", args, {
+      cwd: projectRoot,
+      timeout: importTimeoutMs,
+      maxBuffer: compileMaxBuffer,
+    });
+
+    const entries = flattenEntries(await listProjectEntries(projectRoot));
+    return {
+      warnings: warningsFromPandoc(stderr ?? ""),
+      mediaFiles: entries
+        .filter((entry) => entry.type === "file" && entry.relativePath.startsWith("media/"))
+        .map((entry) => entry.relativePath),
+    };
+  } finally {
+    await rm(tempDirectory, { recursive: true, force: true });
+  }
+}
+
 function engineArgs(engine: string): string[] {
   switch (engine) {
     case "xelatex":
@@ -448,7 +588,7 @@ async function compileProject(
 
 const app = Fastify({
   logger: true,
-  bodyLimit: maxTextContentLength + 1024,
+  bodyLimit: requestBodyLimit,
 });
 
 app.setErrorHandler((error, _request, reply) => {
@@ -510,6 +650,22 @@ app.put("/api/projects/:projectId/files/content", async (request) => {
   return undefined;
 });
 
+app.put("/api/projects/:projectId/files/blob", async (request) => {
+  const sessionId = sessionFromRequest(request);
+  const { projectId } = request.params as { projectId: string };
+  const query = request.query as { path?: unknown };
+  const body = request.body as { contentBase64?: unknown } | null;
+  await findProject(sessionId, projectId);
+  const relativePath = normalizeRelativePath(query.path);
+  const content = parseBase64Content(body?.contentBase64);
+  const root = projectDirectory(sessionId, projectId);
+  const absolutePath = resolveProjectPath(root, relativePath);
+  await mkdir(path.dirname(absolutePath), { recursive: true });
+  await writeFile(absolutePath, content);
+  await touchProject(sessionId, projectId);
+  return { relativePath, size: content.byteLength };
+});
+
 app.get("/api/projects/:projectId/files/exists", async (request) => {
   const sessionId = sessionFromRequest(request);
   const { projectId } = request.params as { projectId: string };
@@ -565,6 +721,44 @@ app.post("/api/projects/:projectId/files/move", async (request) => {
   await rename(from, to);
   await touchProject(sessionId, projectId);
   return { relativePath: toRelativePath };
+});
+
+app.post("/api/import/:kind", async (request) => {
+  const sessionId = sessionFromRequest(request);
+  const { kind } = request.params as { kind: string };
+  const body = request.body as {
+    projectId?: unknown;
+    fileName?: unknown;
+    contentBase64?: unknown;
+  } | null;
+
+  if (!importKinds.has(kind)) {
+    throw new Error("Import type must be docx or markdown.");
+  }
+
+  const sourceName = safeUploadName(
+    body?.fileName,
+    kind === "docx" ? "document.docx" : "document.md",
+  );
+  const content = parseBase64Content(body?.contentBase64);
+  const { project, created } = await projectForImport(sessionId, body?.projectId, sourceName);
+  const root = projectDirectory(sessionId, project.id);
+  const desiredOutputPath = created ? "main.tex" : `${fileStem(sourceName)}.tex`;
+  const outputPath = created
+    ? desiredOutputPath
+    : await uniqueTexPath(root, desiredOutputPath);
+
+  const importResult = await importWithPandoc(root, kind, sourceName, content, outputPath);
+  await touchProject(sessionId, project.id);
+
+  return {
+    project: created ? toOpenProject(project) : undefined,
+    relativePath: outputPath,
+    sourcePath: sourceName,
+    converter: "pandoc",
+    warnings: importResult.warnings,
+    mediaFiles: importResult.mediaFiles,
+  } satisfies ImportResult;
 });
 
 app.post("/api/compile", async (request) => {

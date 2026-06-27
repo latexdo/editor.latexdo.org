@@ -26,6 +26,8 @@ The frontend is built from the sibling `latexdo` repo with `VITE_LATEXDO_RUNTIME
 - Web editor static hosting through Cloudflare Workers assets.
 - Per-browser-session cloud projects.
 - File tree, file read/write, file/folder creation, and move operations.
+- Browser folder import through the hosted **Open Folder** action.
+- DOCX and Markdown import through Pandoc in the backend container.
 - Real LaTeX compilation with `latexmk` inside the backend container.
 - PDF retrieval from the compiled project.
 
@@ -34,7 +36,6 @@ The frontend is built from the sibling `latexdo` repo with `VITE_LATEXDO_RUNTIME
 - Public auth.
 - Durable multi-user account storage.
 - Git operations.
-- DOCX/Markdown import.
 - Real terminal access.
 - SyncTeX source/PDF jumps.
 
@@ -85,6 +86,19 @@ Non-production deploy command: npx wrangler versions upload
 ```
 
 The Worker name in Cloudflare must match `name` in `wrangler.jsonc`: `latexdo-cloud`.
+
+If the deploy log ends with `Unauthorized`, the build is reaching Wrangler but Wrangler
+does not have a valid deploy token. In the Cloudflare dashboard, create an API token from
+the **Edit Cloudflare Workers** template and add these build variables/secrets to the
+Worker build configuration:
+
+```text
+CLOUDFLARE_ACCOUNT_ID=<your account id>
+CLOUDFLARE_API_TOKEN=<token created from Edit Cloudflare Workers>
+```
+
+Do not use an account read-only token for `npx wrangler deploy`; read-only access can
+inspect the account but cannot publish Workers, Durable Objects, or Containers.
 
 This Worker also deploys a Cloudflare Container from `Dockerfile`. If the Cloudflare build
 logs report that Docker is unavailable, push a prebuilt image to Cloudflare Registry,
