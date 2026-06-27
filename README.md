@@ -46,8 +46,18 @@ From this repo:
 
 ```sh
 npm install
-LATEXDO_FRONTEND_REPO=/Users/omar/Desktop/Github/latexdo npm run build:frontend
 npm run dev
+```
+
+`dist/` is committed on purpose, like the static `latexdo.github.io` site. That makes the
+Cloudflare deployment self-contained: Cloudflare fetches this repository and deploys the
+Worker plus the already-built frontend assets from `dist/`.
+
+To refresh the frontend assets from the local LatexDo app repo, run this locally and commit
+the changed `dist/` files:
+
+```sh
+LATEXDO_FRONTEND_REPO=/Users/omar/Desktop/Github/latexdo npm run build:frontend
 ```
 
 For backend-only local development:
@@ -61,24 +71,33 @@ The backend listens on `PORT` or `8787`.
 
 ## Cloudflare deploy
 
-Required GitHub repository secrets:
+This repo is set up for Cloudflare Workers Builds, not GitHub Actions deployment.
+Connect `latexdo/latexdo-cloud` to the existing Worker in Cloudflare so Cloudflare fetches
+the repository and runs the deploy itself on pushes to `main`.
+
+Use these Cloudflare Worker build settings:
 
 ```text
-CLOUDFLARE_ACCOUNT_ID
-CLOUDFLARE_API_TOKEN
+Root directory: repository root (leave blank)
+Build command: npm run build
+Deploy command: npx wrangler deploy
+Non-production deploy command: npx wrangler versions upload
 ```
 
-The token needs permission to deploy Workers, assets, durable objects, and Containers for the account/zone.
+The Worker name in Cloudflare must match `name` in `wrangler.jsonc`: `latexdo-cloud`.
 
-Deploy manually:
+This Worker also deploys a Cloudflare Container from `Dockerfile`. If the Cloudflare build
+logs report that Docker is unavailable, push a prebuilt image to Cloudflare Registry,
+Docker Hub, or ECR and change `containers[0].image` in `wrangler.jsonc` to that image
+reference.
+
+For a manual local deploy:
 
 ```sh
 npm install
-LATEXDO_FRONTEND_REPO=/Users/omar/Desktop/Github/latexdo npm run build:frontend
-npx wrangler deploy
+npm run build
+npm run deploy
 ```
-
-The GitHub Actions workflow does the same on `main`.
 
 ## Domain
 

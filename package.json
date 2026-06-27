@@ -5,8 +5,9 @@
   "description": "Cloudflare-hosted LatexDo editor backend and deployment.",
   "type": "module",
   "scripts": {
+    "build": "npm run typecheck",
     "build:frontend": "sh scripts/sync-frontend.sh",
-    "deploy": "npm run build:frontend && wrangler deploy",
+    "deploy": "wrangler deploy",
     "dev": "wrangler dev",
     "server:dev": "tsx server/src/index.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p server/tsconfig.json --noEmit"
