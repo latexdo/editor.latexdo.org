@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.wrangler/
+.dev.vars
+.env
+storage/*
+!storage/.gitkeep
+*.log
+.DS_Store

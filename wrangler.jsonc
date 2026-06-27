@@ -1,0 +1,36 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "latexdo-cloud",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-06-27",
+  "assets": {
+    "binding": "ASSETS",
+    "directory": "./dist",
+    "not_found_handling": "single-page-application"
+  },
+  "containers": [
+    {
+      "class_name": "LatexDoBackend",
+      "image": "./Dockerfile",
+      "instance_type": "standard-3",
+      "max_instances": 1
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "LATEXDO_BACKEND",
+        "class_name": "LatexDoBackend"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["LatexDoBackend"]
+    }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}

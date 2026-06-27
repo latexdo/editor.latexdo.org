@@ -1,0 +1,25 @@
+{
+  "name": "latexdo-cloud",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cloudflare-hosted LatexDo editor backend and deployment.",
+  "type": "module",
+  "scripts": {
+    "build:frontend": "sh scripts/sync-frontend.sh",
+    "deploy": "npm run build:frontend && wrangler deploy",
+    "dev": "wrangler dev",
+    "server:dev": "tsx server/src/index.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p server/tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@cloudflare/containers": "latest",
+    "fastify": "latest",
+    "tsx": "latest"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "latest",
+    "@types/node": "latest",
+    "typescript": "latest",
+    "wrangler": "latest"
+  }
+}
