@@ -1,128 +1,83 @@
-# LatexDo Cloud
+# editor.latexdo.org
 
-Cloudflare-hosted backend and deployment for the real LatexDo web editor.
+This repository hosts the Cloudflare version of the LatexDo editor at `https://editor.latexdo.org`. It combines a Worker, static frontend assets, a Cloudflare Container backend, and a Fastify API for project and LaTeX operations.
 
-This repo does **not** replace [`latexdo`](https://github.com/latexdo/latexdo). The split is:
+## Repository Role
 
-- `latexdo`: desktop app and shared React/Monaco editor UI.
-- `latexdo-cloud`: Cloudflare Worker, Cloudflare Container backend, TeX runtime, deployment, and hosted editor API.
+- Serves the hosted LatexDo frontend from `dist/`.
+- Proxies `/api/*` requests from the Worker to the backend container.
+- Runs a Fastify API for project files, imports, compilation, PDF output, sharing, and presence.
+- Builds the hosted frontend from the sibling `latexdo` repo.
 
-## Architecture
+## Requirements
 
-```text
-editor.latexdo.org
-  -> Cloudflare Worker
-      -> static LatexDo frontend from ./dist
-      -> /api/* proxied to Cloudflare Container
-          -> Fastify API
-          -> project files under LATEXDO_DATA_ROOT
-          -> latexmk + TeX Live compilation
-```
+- Node.js 20 or newer.
+- npm.
+- Wrangler for local Worker previews and deploys.
+- Docker or Cloudflare container support for container work.
+- TeX Live, `latexmk`, and Pandoc when running backend features locally.
 
-The frontend is built from the sibling `latexdo` repo with `VITE_LATEXDO_RUNTIME=cloud`, so it uses HTTP APIs instead of browser `localStorage`.
+## Run Locally
 
-## What works in this scaffold
-
-- Web editor static hosting through Cloudflare Workers assets.
-- Per-browser-session cloud projects.
-- File tree, file read/write, file/folder creation, and move operations.
-- Browser folder import through the hosted **Open Folder** action.
-- DOCX and Markdown import through Pandoc in the backend container.
-- Real LaTeX compilation with `latexmk` inside the backend container.
-- PDF retrieval from the compiled project.
-
-## Deliberately not enabled yet
-
-- Public auth.
-- Durable multi-user account storage.
-- Git operations.
-- Real terminal access.
-- SyncTeX source/PDF jumps.
-
-Those should be added after auth and compile sandboxing are hardened.
-
-## Local setup
-
-From this repo:
+Run the Worker preview with the committed frontend assets:
 
 ```sh
 npm install
 npm run dev
 ```
 
-`dist/` is committed on purpose, like the static `latexdo.github.io` site. That makes the
-Cloudflare deployment self-contained: Cloudflare fetches this repository and deploys the
-Worker plus the already-built frontend assets from `dist/`.
-
-To refresh the frontend assets from the local LatexDo app repo, run this locally and commit
-the changed `dist/` files:
-
-```sh
-LATEXDO_FRONTEND_REPO=/Users/omar/Desktop/Github/latexdo npm run build:frontend
-```
-
-For backend-only local development:
+Run only the backend API:
 
 ```sh
 npm install
 LATEXDO_DATA_ROOT=./storage/dev npm run server:dev
 ```
 
-The backend listens on `PORT` or `8787`.
+The backend listens on `PORT` or `8787` by default.
 
-## Cloudflare deploy
+Refresh the hosted frontend from the local desktop app repo:
 
-This repo is set up for Cloudflare Workers Builds, not GitHub Actions deployment.
-Connect `latexdo/latexdo-cloud` to the existing Worker in Cloudflare so Cloudflare fetches
-the repository and runs the deploy itself on pushes to `main`.
+```sh
+LATEXDO_FRONTEND_REPO=/Users/omar/Desktop/Github/latexdo npm run build:frontend
+```
 
-Use these Cloudflare Worker build settings:
+## Common Commands
+
+```sh
+npm run dev             # Start Wrangler dev for the Worker.
+npm run server:dev      # Start the Fastify backend directly.
+npm run build           # Run type checks for deploy.
+npm run build:frontend  # Rebuild dist/ from the local LatexDo app.
+npm run typecheck       # Check Worker and backend TypeScript.
+npm run deploy          # Deploy with Wrangler.
+```
+
+## Deploy
+
+Manual deploy:
+
+```sh
+npm install
+npm run deploy
+```
+
+Cloudflare Workers Builds should use:
 
 ```text
-Root directory: repository root (leave blank)
 Build command: npm run build
 Deploy command: npx wrangler deploy
 Non-production deploy command: npx wrangler versions upload
 ```
 
-The Worker name in Cloudflare must match `name` in `wrangler.jsonc`: `latexdo-cloud`.
-
-If the deploy log ends with `Unauthorized`, the build is reaching Wrangler but Wrangler
-does not have a valid deploy token. In the Cloudflare dashboard, create an API token from
-the **Edit Cloudflare Workers** template and add these build variables/secrets to the
-Worker build configuration:
+Set these for non-interactive deploys:
 
 ```text
-CLOUDFLARE_ACCOUNT_ID=<your account id>
-CLOUDFLARE_API_TOKEN=<token created from Edit Cloudflare Workers>
+CLOUDFLARE_ACCOUNT_ID=<account id>
+CLOUDFLARE_API_TOKEN=<deploy token>
 ```
 
-Do not use an account read-only token for `npx wrangler deploy`; read-only access can
-inspect the account but cannot publish Workers, Durable Objects, or Containers.
+Attach `editor.latexdo.org` to the Worker in Cloudflare. If Docker is unavailable in the Cloudflare build environment, push a prebuilt backend image and update `containers[0].image` in `wrangler.jsonc`.
 
-This Worker also deploys a Cloudflare Container from `Dockerfile`. If the Cloudflare build
-logs report that Docker is unavailable, push a prebuilt image to Cloudflare Registry,
-Docker Hub, or ECR and change `containers[0].image` in `wrangler.jsonc` to that image
-reference.
+## Security Notes
 
-For a manual local deploy:
-
-```sh
-npm install
-npm run build
-npm run deploy
-```
-
-## Domain
-
-Attach `editor.latexdo.org` to this Worker in Cloudflare. This replaces the static GitHub Pages editor target for the real hosted editor.
-
-## Security notes
-
-LaTeX compilation is not a harmless operation. This scaffold already runs without shell escape and inside a non-root container user, but production still needs:
-
-- authentication before public launch
-- per-user/project quotas
-- compile timeout, memory, and disk limits reviewed against your Cloudflare plan
-- persistent storage design, such as R2 or external storage, if projects must survive container replacement
-- abuse monitoring and request rate limits
+LaTeX compilation can execute expensive or unsafe workloads if it is not controlled carefully. Keep shell escape disabled, run the backend as a non-root user, and add production controls for auth, quotas, timeouts, storage limits, abuse monitoring, and rate limiting before opening the hosted editor broadly.
