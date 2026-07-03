@@ -69,12 +69,7 @@ Deploy command: npx wrangler deploy
 Non-production deploy command: npx wrangler versions upload
 ```
 
-Set these for non-interactive deploys:
-
-```text
-CLOUDFLARE_ACCOUNT_ID=<account id>
-CLOUDFLARE_API_TOKEN=<deploy token>
-```
+Do not add `CLOUDFLARE_ACCOUNT_ID` or `CLOUDFLARE_API_TOKEN` as build variables for Workers Builds. Use the build token selected in Cloudflare's Worker build settings so Cloudflare can deploy with its own managed authentication.
 
 Attach `editor.latexdo.org` to the Worker in Cloudflare. If Docker is unavailable in the Cloudflare build environment, push a prebuilt backend image and update `containers[0].image` in `wrangler.jsonc`.
 
