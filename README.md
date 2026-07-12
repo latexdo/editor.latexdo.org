@@ -49,7 +49,8 @@ npm run server:dev      # Start the Fastify backend directly.
 npm run build           # Run type checks for deploy.
 npm run build:frontend  # Rebuild dist/ from the local LatexDo app.
 npm run typecheck       # Check Worker and backend TypeScript.
-npm run deploy          # Deploy with Wrangler.
+npm run deploy          # Deploy Worker/assets without updating the container.
+npm run deploy:containers # Deploy Worker/assets and update the backend container.
 ```
 
 ## Deploy
@@ -61,15 +62,24 @@ npm install
 npm run deploy
 ```
 
+Deploy backend container changes:
+
+```sh
+npm install
+npm run deploy:containers
+```
+
 Cloudflare Workers Builds should use:
 
 ```text
 Build command: npm run build
-Deploy command: npx wrangler deploy
+Deploy command: npm run deploy
 Non-production deploy command: npx wrangler versions upload
 ```
 
-Do not add `CLOUDFLARE_ACCOUNT_ID` or `CLOUDFLARE_API_TOKEN` as build variables for Workers Builds. Use the build token selected in Cloudflare's Worker build settings so Cloudflare can deploy with its own managed authentication.
+The default deploy script passes `--containers-rollout=none`. This is intentional for Workers Builds: a Dockerfile-backed container image makes `wrangler deploy` build the image and request Cloudflare registry push credentials. If the selected Workers Builds API token does not include Workers Containers write access, the build fails after the image build with `Unauthorized`.
+
+Only use `npm run deploy:containers` in an environment whose Cloudflare API token can manage Workers Containers. In Wrangler scope terms, the token must include `containers:write` in addition to the Worker deployment permissions.
 
 Attach `editor.latexdo.org` to the Worker in Cloudflare. If Docker is unavailable in the Cloudflare build environment, push a prebuilt backend image and update `containers[0].image` in `wrangler.jsonc`.
 
