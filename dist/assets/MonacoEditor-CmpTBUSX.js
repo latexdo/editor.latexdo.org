@@ -1,0 +1,1 @@
+import{j as r}from"./react-vendor-Wkn31o24.js";import{w as t,F as n,l as i,m as a}from"./editor-vendor-B6vdv6AF.js";import"./vite-runtime-Dp1pzeXC.js";i.config({monaco:a});function c(o){return r.jsx(n,{...o})}function e(o){return r.jsx(t,{...o})}export{e as MonacoDiffEditor,c as MonacoEditor};
