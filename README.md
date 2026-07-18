@@ -1,12 +1,12 @@
 # editor.latexdo.org
 
-This repository hosts the Cloudflare version of the LatexDo editor at `https://editor.latexdo.org`. It combines a Worker, static frontend assets, a Cloudflare Container backend, and a Fastify API for project and LaTeX operations.
+This repository hosts the Cloudflare preview version of the LatexDo editor at `https://editor.latexdo.org`. The default deployment serves the committed frontend assets and a small preview API Worker so the editor can be opened without deploying the LaTeX backend container.
 
 ## Repository Role
 
 - Serves the hosted LatexDo frontend from `dist/`.
-- Proxies `/api/*` requests from the Worker to the backend container.
-- Runs a Fastify API for project files, imports, compilation, PDF output, sharing, and presence.
+- Provides preview `/api/*` responses for opening a sample cloud project and editing files in a warm Worker session.
+- Returns a graceful "compilation disabled" result for PDF generation.
 - Builds the hosted frontend from the sibling `latexdo` repo.
 
 ## Requirements
@@ -14,8 +14,7 @@ This repository hosts the Cloudflare version of the LatexDo editor at `https://e
 - Node.js 20 or newer.
 - npm.
 - Wrangler for local Worker previews and deploys.
-- Docker or Cloudflare container support for container work.
-- TeX Live, `latexmk`, and Pandoc when running backend features locally.
+- Docker, TeX Live, `latexmk`, and Pandoc are only needed if you work on the old backend code locally.
 
 ## Run Locally
 
@@ -26,7 +25,7 @@ npm install
 npm run dev
 ```
 
-Run only the backend API:
+Run only the old backend API:
 
 ```sh
 npm install
@@ -46,42 +45,29 @@ LATEXDO_FRONTEND_REPO=/Users/omar/Desktop/Github/latexdo npm run build:frontend
 ```sh
 npm run dev             # Start Wrangler dev for the Worker.
 npm run server:dev      # Start the Fastify backend directly.
-npm run build           # Run type checks for deploy.
+npm run build           # Verify the committed preview assets exist.
 npm run build:frontend  # Rebuild dist/ from the local LatexDo app.
 npm run typecheck       # Check Worker and backend TypeScript.
-npm run deploy          # Deploy Worker/assets without updating the container.
-npm run deploy:containers # Deploy Worker/assets and update the backend container.
+npm run deploy          # Deploy the preview Worker and static assets.
 ```
 
 ## Deploy
 
-Manual deploy:
+Manual preview deploy:
 
 ```sh
 npm install
 npm run deploy
 ```
 
-Deploy backend container changes:
-
-```sh
-npm install
-npm run deploy:containers
-```
-
 Cloudflare Workers Builds should use:
 
 ```text
 Build command: npm run build
-Deploy command: npm run deploy
-Non-production deploy command: npx wrangler versions upload
+Deploy command: npx wrangler deploy
 ```
 
-The default deploy script passes `--containers-rollout=none`. This is intentional for Workers Builds: a Dockerfile-backed container image makes `wrangler deploy` build the image and request Cloudflare registry push credentials. If the selected Workers Builds API token does not include Workers Containers write access, the build fails after the image build with `Unauthorized`.
-
-Only use `npm run deploy:containers` in an environment whose Cloudflare API token can manage Workers Containers. In Wrangler scope terms, the token must include `containers:write` in addition to the Worker deployment permissions.
-
-Attach `editor.latexdo.org` to the Worker in Cloudflare. If Docker is unavailable in the Cloudflare build environment, push a prebuilt backend image and update `containers[0].image` in `wrangler.jsonc`.
+The default `wrangler.jsonc` intentionally does not declare Cloudflare Containers or Durable Objects. This prevents Workers Builds from building the old Dockerfile-backed TeX image and failing with a container registry `Unauthorized` error. Attach `editor.latexdo.org` to the Worker in Cloudflare.
 
 ## Security Notes
 

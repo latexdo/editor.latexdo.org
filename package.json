@@ -2,13 +2,12 @@
   "name": "latexdo-cloud",
   "version": "0.1.0",
   "private": true,
-  "description": "Cloudflare-hosted LatexDo editor backend and deployment.",
+  "description": "Cloudflare-hosted LatexDo editor preview deployment.",
   "type": "module",
   "scripts": {
-    "build": "npm run typecheck",
+    "build": "node scripts/preview-build.mjs",
     "build:frontend": "sh scripts/sync-frontend.sh",
-    "deploy": "wrangler deploy --containers-rollout=none",
-    "deploy:containers": "wrangler deploy --containers-rollout=immediate",
+    "deploy": "wrangler deploy",
     "dev": "wrangler dev",
     "server:dev": "tsx server/src/index.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p server/tsconfig.json --noEmit"
