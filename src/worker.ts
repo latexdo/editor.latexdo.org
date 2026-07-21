@@ -2,6 +2,21 @@ interface Env {
   ASSETS: Fetcher;
 }
 
+// Cloudflare still has historical Durable Object metadata for this Worker.
+// Keep this export so preview-only deploys can replace the Worker without
+// reintroducing the old container-backed backend binding.
+export class LatexDoBackend {
+  async fetch(): Promise<Response> {
+    return new Response(
+      "The LatexDo backend is disabled in this preview deployment.",
+      {
+        status: 410,
+        headers: { "content-type": "text/plain; charset=utf-8" },
+      },
+    );
+  }
+}
+
 interface ProjectMeta {
   id: string;
   name: string;
