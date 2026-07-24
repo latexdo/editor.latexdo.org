@@ -1,5 +1,8 @@
 interface Env {
   ASSETS: Fetcher;
+  LATEXDO_PRODUCT_NAME?: string;
+  LATEXDO_PREVIEW_PROJECT_NAME?: string;
+  LATEXDO_PUBLIC_ORIGIN?: string;
 }
 
 // Cloudflare still has historical Durable Object metadata for this Worker.
@@ -44,15 +47,36 @@ interface ProjectEntry {
 }
 
 const sessions = new Map<string, PreviewSession>();
-const previewProjectName = "LatexDo Preview";
+const defaultProductName = "LatexDo";
+const defaultPreviewProjectName = "LatexDo Preview";
 
-const starterDocument = String.raw`\documentclass[11pt]{article}
+function productName(env: Env): string {
+  return env.LATEXDO_PRODUCT_NAME?.trim() || defaultProductName;
+}
+
+function previewProjectName(env: Env): string {
+  const configured = env.LATEXDO_PREVIEW_PROJECT_NAME?.trim();
+  if (configured) return configured;
+  const product = productName(env);
+  return product === defaultProductName
+    ? defaultPreviewProjectName
+    : `${product} Workspace`;
+}
+
+function publicOrigin(env: Env, request: Request): string {
+  return env.LATEXDO_PUBLIC_ORIGIN?.trim() || new URL(request.url).origin;
+}
+
+function starterDocumentFor(env: Env): string {
+  const title = previewProjectName(env);
+  const product = productName(env);
+  return String.raw`\documentclass[11pt]{article}
 
 \usepackage[margin=1in]{geometry}
 \usepackage{microtype}
 \usepackage{hyperref}
 
-\title{LatexDo Preview}
+\title{${title}}
 \author{}
 \date{\today}
 
@@ -62,7 +86,7 @@ const starterDocument = String.raw`\documentclass[11pt]{article}
 
 \section{Welcome}
 
-This preview deploy is intentionally static. The editor, file tree,
+This ${product} workspace deploy is intentionally static. The editor, file tree,
 settings, templates, snippets, and local writing tools are available.
 
 \section{Compilation}
@@ -72,13 +96,16 @@ without the LaTeX container backend.
 
 \end{document}
 `;
+}
 
-const referencesBib = String.raw`@misc{latexdo-preview,
-  title = {LatexDo Preview},
-  author = {LatexDo},
+function referencesBibFor(env: Env): string {
+  return String.raw`@misc{latexdo-preview,
+  title = {${previewProjectName(env)}},
+  author = {${productName(env)}},
   year = {2026}
 }
 `;
+}
 
 async function serveAsset(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
@@ -90,9 +117,10 @@ async function serveAsset(request: Request, env: Env): Promise<Response> {
     url.pathname.endsWith(".js")
   ) {
     const body = await response.text();
+    const publicBaseUrl = JSON.stringify(publicOrigin(env, request));
     const rewritten = body.replaceAll(
       "\"https://editor.latexdo.org\"",
-      "window.location.origin",
+      publicBaseUrl,
     );
     const headers = new Headers(response.headers);
     headers.set("content-type", "application/javascript; charset=utf-8");
@@ -182,7 +210,8 @@ function stablePreviewProjectId(sessionId: string): string {
 }
 
 function createPreviewProject(
-  name = previewProjectName,
+  env: Env,
+  name = previewProjectName(env),
   id: string = crypto.randomUUID(),
 ): PreviewProject {
   const now = Date.now();
@@ -196,8 +225,8 @@ function createPreviewProject(
     meta,
     folders: new Set(["sections"]),
     files: new Map([
-      ["main.tex", starterDocument],
-      ["references.bib", referencesBib],
+      ["main.tex", starterDocumentFor(env)],
+      ["references.bib", referencesBibFor(env)],
       [
         "sections/notes.tex",
         "% Add notes here. This file is included to show the project tree.\n",
@@ -206,13 +235,14 @@ function createPreviewProject(
   };
 }
 
-function getSession(request: Request): PreviewSession {
+function getSession(request: Request, env: Env): PreviewSession {
   const sessionId = normalizeSessionId(request);
   let session = sessions.get(sessionId);
 
   if (!session) {
     const project = createPreviewProject(
-      previewProjectName,
+      env,
+      previewProjectName(env),
       stablePreviewProjectId(sessionId),
     );
     session = {
@@ -246,8 +276,8 @@ function ensureParentFolders(project: PreviewProject, relativePath: string): voi
   }
 }
 
-function starterContent(relativePath: string): string {
-  if (fileName(relativePath) === "main.tex") return starterDocument;
+function starterContent(env: Env, relativePath: string): string {
+  if (fileName(relativePath) === "main.tex") return starterDocumentFor(env);
   if (relativePath.endsWith(".bib")) return "% Add BibTeX entries here.\n";
   return "";
 }
@@ -356,10 +386,10 @@ function moveEntry(
   ensureParentFolders(project, toRelativePath);
 }
 
-async function handleApi(request: Request): Promise<Response> {
+async function handleApi(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
   const method = request.method.toUpperCase();
-  const session = getSession(request);
+  const session = getSession(request, env);
 
   try {
     if (url.pathname === "/api/health") {
@@ -373,7 +403,10 @@ async function handleApi(request: Request): Promise<Response> {
     if (url.pathname === "/api/projects" && method === "POST") {
       const body = await requestBody(request);
       const folderName = typeof body.folderName === "string" ? body.folderName.trim() : "";
-      const project = createPreviewProject(folderName || "LatexDo Preview Project");
+      const project = createPreviewProject(
+        env,
+        folderName || `${productName(env)} Workspace Project`,
+      );
       session.projects.set(project.meta.id, project);
       touch(session, project);
       return json(openProject(project.meta));
@@ -383,7 +416,7 @@ async function handleApi(request: Request): Promise<Response> {
       const project =
         session.projects.get(session.currentProjectId) ??
         [...session.projects.values()][0] ??
-        createPreviewProject();
+        createPreviewProject(env);
       session.projects.set(project.meta.id, project);
       touch(session, project);
       return json(openProject(project.meta));
@@ -424,7 +457,7 @@ async function handleApi(request: Request): Promise<Response> {
         } else if (body.type === "file") {
           ensureParentFolders(project, relativePath);
           if (!project.files.has(relativePath)) {
-            project.files.set(relativePath, starterContent(relativePath));
+            project.files.set(relativePath, starterContent(env, relativePath));
           }
         } else {
           throw new Error("File type must be file or directory.");
@@ -520,7 +553,7 @@ export default {
     const url = new URL(request.url);
 
     if (url.pathname.startsWith("/api/")) {
-      return handleApi(request);
+      return handleApi(request, env);
     }
 
     return serveAsset(request, env);
